@@ -4,109 +4,127 @@ pragma solidity ^0.8.20;
 contract WalletLock {
     event Locked(address indexed owner, address indexed nominee, uint256 amount, uint256 timestamp);
     event Released(address indexed owner, address indexed nominee, uint256 amount, uint256 timestamp);
+    event ActivityUpdated(address indexed user, uint256 newTimestamp);
     event MonitorSignerUpdated(address indexed oldSigner, address indexed newSigner);
     event OwnershipTransferred(address indexed oldOwner, address indexed newOwner);
+    event Paused(bool status);
 
     struct LockInfo {
         address nominee;
         uint256 amount;
-        uint256 lockedAt;
         bool released;
+        uint256 timestamp;
     }
 
-    mapping(address => LockInfo) public locks;
-
+    mapping(address => LockInfo[]) public locks;
+    mapping(address => uint256) public lastActiveTimestamp;
+    address[] private allLockers;
+    bool public paused;
     address public monitorSigner;
     address public owner;
-
     uint256 public constant INACTIVITY_PERIOD = 60 days;
 
     modifier onlyOwner() {
-        require(msg.sender == owner, "WalletLock: caller is not owner");
+        require(msg.sender == owner, "Not owner");
+        _;
+    }
+
+    modifier notPaused() {
+        require(!paused, "System paused");
         _;
     }
 
     constructor(address _monitorSigner) {
-        require(_monitorSigner != address(0), "Invalid monitor signer");
-        monitorSigner = _monitorSigner;
         owner = msg.sender;
-        emit MonitorSignerUpdated(address(0), _monitorSigner);
-        emit OwnershipTransferred(address(0), msg.sender);
+        monitorSigner = _monitorSigner;
     }
 
-    function lock(address nominee) external payable {
-        require(nominee != address(0), "Invalid nominee");
-        require(msg.value > 0, "Must send ETH to lock");
-
-        LockInfo storage li = locks[msg.sender];
-        require(!li.released && li.amount == 0, "Existing active lock present");
-
-        locks[msg.sender] = LockInfo({
-            nominee: nominee,
-            amount: msg.value,
-            lockedAt: block.timestamp,
-            released: false
-        });
-
-        emit Locked(msg.sender, nominee, msg.value, block.timestamp);
+    function lock(address[] calldata nominees) external payable notPaused {
+        require(msg.value > 0, "Must send ETH");
+        require(nominees.length > 0, "No nominees");
+        uint256 share = msg.value / nominees.length;
+        require(share > 0, "Too many nominees");
+        if (locks[msg.sender].length == 0) {
+            allLockers.push(msg.sender);
+        }
+        for (uint256 i = 0; i < nominees.length; i++) {
+            locks[msg.sender].push(
+                LockInfo({
+                    nominee: nominees[i],
+                    amount: share,
+                    released: false,
+                    timestamp: block.timestamp
+                })
+            );
+            emit Locked(msg.sender, nominees[i], share, block.timestamp);
+        }
+        lastActiveTimestamp[msg.sender] = block.timestamp;
     }
 
-    function unlock(address ownerAddr, uint256 lastActiveTimestamp, bytes calldata signature) external {
-        LockInfo storage li = locks[ownerAddr];
-        require(li.amount > 0, "No funds locked for owner");
-        require(!li.released, "Already released");
-        require(block.timestamp >= lastActiveTimestamp + INACTIVITY_PERIOD, "Inactivity period not yet reached");
+    function withdraw() external notPaused {
+        LockInfo[] storage userLocks = locks[msg.sender];
+        require(userLocks.length > 0, "No locks found");
+        uint256 totalWithdraw = 0;
+        for (uint256 i = 0; i < userLocks.length; i++) {
+            if (!userLocks[i].released && userLocks[i].amount > 0) {
+                totalWithdraw += userLocks[i].amount;
+                userLocks[i].released = true;
+                emit Released(msg.sender, userLocks[i].nominee, userLocks[i].amount, block.timestamp);
+            }
+        }
+        require(totalWithdraw > 0, "Nothing to withdraw");
+        (bool sent, ) = msg.sender.call{value: totalWithdraw}("");
+        require(sent, "Withdraw failed");
+    }
 
-        bytes32 messageHash = keccak256(abi.encodePacked(address(this), ownerAddr, lastActiveTimestamp));
-        bytes32 ethSigned = _toEthSignedMessageHash(messageHash);
-        address recovered = _recoverSigner(ethSigned, signature);
-        require(recovered == monitorSigner, "Invalid inactivity proof signature");
+    function autoRelease(address ownerAddr) external notPaused {
+        require(msg.sender == monitorSigner || msg.sender == owner, "Not authorized");
+        LockInfo[] storage userLocks = locks[ownerAddr];
+        require(userLocks.length > 0, "No locks");
+        require(block.timestamp >= lastActiveTimestamp[ownerAddr] + INACTIVITY_PERIOD, "Inactivity not reached");
+        uint256 totalReleased = 0;
+        for (uint256 i = 0; i < userLocks.length; i++) {
+            if (!userLocks[i].released && userLocks[i].amount > 0) {
+                userLocks[i].released = true;
+                totalReleased += userLocks[i].amount;
+                (bool sent, ) = userLocks[i].nominee.call{value: userLocks[i].amount}("");
+                require(sent, "Transfer failed");
+                emit Released(ownerAddr, userLocks[i].nominee, userLocks[i].amount, block.timestamp);
+            }
+        }
+        require(totalReleased > 0, "No funds released");
+    }
 
-        li.released = true;
-        uint256 amount = li.amount;
-        address nominee = li.nominee;
-        li.amount = 0;
+    function markActive(address user, uint256 timestamp) external {
+        require(msg.sender == monitorSigner, "Only monitor");
+        lastActiveTimestamp[user] = timestamp;
+        emit ActivityUpdated(user, timestamp);
+    }
 
-        (bool sent, ) = nominee.call{value: amount}("");
-        require(sent, "Transfer to nominee failed");
-
-        emit Released(ownerAddr, nominee, amount, block.timestamp);
+    function setPaused(bool _paused) external onlyOwner {
+        paused = _paused;
+        emit Paused(_paused);
     }
 
     function updateMonitorSigner(address newSigner) external onlyOwner {
-        require(newSigner != address(0), "Invalid new signer");
-        address old = monitorSigner;
+        require(newSigner != address(0), "Invalid");
+        emit MonitorSignerUpdated(monitorSigner, newSigner);
         monitorSigner = newSigner;
-        emit MonitorSignerUpdated(old, newSigner);
     }
 
     function transferOwnership(address newOwner) external onlyOwner {
-        require(newOwner != address(0), "Invalid new owner");
-        address old = owner;
+        require(newOwner != address(0), "Invalid");
+        emit OwnershipTransferred(owner, newOwner);
         owner = newOwner;
-        emit OwnershipTransferred(old, newOwner);
+    }
+
+    function getLocks(address user) external view returns (LockInfo[] memory) {
+        return locks[user];
+    }
+
+    function getAllLockers() external view returns (address[] memory) {
+        return allLockers;
     }
 
     receive() external payable {}
-
-    function _toEthSignedMessageHash(bytes32 hash) internal pure returns (bytes32) {
-        return keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", hash));
-    }
-
-    function _recoverSigner(bytes32 ethSignedMessageHash, bytes memory signature) internal pure returns (address) {
-        require(signature.length == 65, "Invalid signature length");
-        bytes32 r;
-        bytes32 s;
-        uint8 v;
-        assembly {
-            r := mload(add(signature, 0x20))
-            s := mload(add(signature, 0x40))
-            v := byte(0, mload(add(signature, 0x60)))
-        }
-        if (v < 27) {
-            v += 27;
-        }
-        require(v == 27 || v == 28, "Invalid signature 'v' value");
-        return ecrecover(ethSignedMessageHash, v, r, s);
-    }
 }
