@@ -100,7 +100,7 @@ export default function App() {
               textShadow: "0 0 12px rgba(180,100,255,0.5)",
             }}
           >
-            💼 WalletLock Galaxy
+            💼 HIREAFTER - LifeGaurd
           </h1>
           <nav style={{ display: "flex", gap: "1.5rem", alignItems: "center" }}>
             <NavLink to="/">Twitter</NavLink>
