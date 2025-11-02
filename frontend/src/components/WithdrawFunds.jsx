@@ -4,36 +4,61 @@ import { getContract } from "../utils/contract";
 import { useWalletClient } from "wagmi";
 
 export default function WithdrawFunds() {
-  const [lockId, setLockId] = useState("");
   const { data: walletClient } = useWalletClient();
+  const [loading, setLoading] = useState(false);
 
   const handleWithdraw = async () => {
-    if (!walletClient) return alert("Connect wallet first!");
-    const provider = new ethers.BrowserProvider(walletClient);
-    const signer = await provider.getSigner();
-    const contract = await getContract(signer);
+    if (!walletClient) return alert("🔗 Connect your wallet first!");
+    setLoading(true);
+    try {
+      const provider = new ethers.BrowserProvider(walletClient);
+      const signer = await provider.getSigner();
+      const contract = await getContract(signer);
 
-    const tx = await contract.withdraw(lockId);
-    await tx.wait();
-    alert("💎 Withdrawal successful!");
+      const tx = await contract.withdraw(); // no lockId required
+      await tx.wait();
+      alert("💎 Withdrawal successful!");
+    } catch (err) {
+      console.error(err);
+      alert("⚠️ Transaction failed. Check console for details.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
-    <div style={{ textAlign: "center" }}>
+    <div style={container}>
       <h2 style={heading}>💰 Withdraw Funds</h2>
-      <input
-        type="text"
-        placeholder="Enter Lock ID"
-        value={lockId}
-        onChange={(e) => setLockId(e.target.value)}
-        style={inputStyle}
-      />
-      <button onClick={handleWithdraw} style={buttonStyle}>
-        🌈 Withdraw
+
+      <button
+        onClick={handleWithdraw}
+        style={{
+          ...buttonStyle,
+          opacity: loading ? 0.7 : 1,
+          cursor: loading ? "not-allowed" : "pointer",
+        }}
+        disabled={loading}
+      >
+        {loading ? "⏳ Processing..." : "🌈 Withdraw"}
       </button>
+
+      <p style={note}>
+        Instantly withdraw all available funds to your connected wallet.
+      </p>
     </div>
   );
 }
+
+const container = {
+  textAlign: "center",
+  background: "linear-gradient(135deg, rgba(0,50,50,0.4), rgba(10,10,30,0.7))",
+  padding: "2rem",
+  borderRadius: "20px",
+  border: "1px solid rgba(100,255,255,0.2)",
+  boxShadow: "0 0 25px rgba(0,200,255,0.2), inset 0 0 20px rgba(0,150,255,0.2)",
+  backdropFilter: "blur(14px)",
+  animation: "fadeIn 1.2s ease-in-out",
+};
 
 const heading = {
   fontSize: "2rem",
@@ -45,28 +70,32 @@ const heading = {
   textShadow: "0 0 10px rgba(100,255,255,0.4)",
 };
 
-const inputStyle = {
-  width: "100%",
-  marginBottom: "1rem",
-  padding: "0.8rem 1rem",
-  borderRadius: "10px",
-  background: "rgba(0,0,0,0.4)",
-  border: "1px solid rgba(120,200,255,0.3)",
-  color: "white",
-  fontSize: "1rem",
-  outline: "none",
-  boxShadow: "0 0 10px rgba(0,180,255,0.3)",
-};
-
 const buttonStyle = {
   width: "100%",
-  padding: "0.9rem",
+  padding: "1rem",
   borderRadius: "12px",
   border: "none",
   background: "linear-gradient(90deg, #3b82f6, #22d3ee)",
   color: "white",
   fontWeight: "600",
-  cursor: "pointer",
+  fontSize: "1rem",
   boxShadow: "0 0 20px rgba(50,200,255,0.4)",
   transition: "all 0.3s ease",
 };
+
+const note = {
+  fontSize: "0.85rem",
+  color: "rgba(200,200,255,0.7)",
+  marginTop: "1rem",
+  fontStyle: "italic",
+};
+
+// Add smooth entry animation
+const style = document.createElement("style");
+style.innerHTML = `
+@keyframes fadeIn {
+  0% { opacity: 0; transform: translateY(12px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+`;
+document.head.appendChild(style);
