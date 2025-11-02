@@ -103,7 +103,7 @@ export default function App() {
             💼 HIREAFTER - LifeGaurd
           </h1>
           <nav style={{ display: "flex", gap: "1.5rem", alignItems: "center" }}>
-            <NavLink to="/">Twitter</NavLink>
+            <NavLink to="/">X</NavLink>
             <NavLink to="/lock">Lock</NavLink>
             <NavLink to="/withdraw">Withdraw</NavLink>
             <NavLink to="/view">View</NavLink>

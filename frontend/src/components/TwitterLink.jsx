@@ -25,19 +25,19 @@ export default function TwitterLink() {
 
   return (
     <div style={container}>
-      <h2 style={heading}>🐦 Link Your Twitter</h2>
+      <h2 style={heading}>🐦 Link Your X</h2>
 
       {!linked ? (
         <>
           <input
             type="text"
-            placeholder="Enter your Twitter username (without @)"
+            placeholder="Enter your X username (without @)"
             value={username}
             onChange={(e) => setUsername(e.target.value)}
             style={inputStyle}
           />
           <button onClick={handleLink} style={buttonStyle}>
-            🔗 Link Twitter
+            🔗 Link X
           </button>
         </>
       ) : (
